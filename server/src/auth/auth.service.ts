@@ -5,13 +5,17 @@ import { Repository, Connection } from "typeorm";
 import { IRegisterSchema } from "./request-schemas/register.schema";
 import PasswordService from "./password.service";
 import { ILoginSchema } from "./request-schemas/login.schema";
+import { JwtService } from "@nestjs/jwt";
 
 @Injectable()
 export default class AuthService {
     @InjectRepository(User)
     private userRepository: Repository<User>;
 
-    public constructor(private passwordService: PasswordService) {}
+    public constructor(
+        private passwordService: PasswordService,
+        private jwtService: JwtService
+    ) {}
 
     public async registerUser(userData: IRegisterSchema): Promise<User> {
         if (await this.checkIfUserCanBeCreated(userData)) {
@@ -20,7 +24,8 @@ export default class AuthService {
             user.email = userData.email.toLowerCase();
             user.username = userData.username;
             user.password = await this.passwordService.hashPassword(userData.password);
-            this.setPermissionLevel(user);
+            await this.setPermissionLevel(user);
+            console.log(user.permissionLevel);
 
             return this.userRepository.save(user);
         }
@@ -38,6 +43,13 @@ export default class AuthService {
         }
         
         return null;
+    }
+
+    public async login(user: User) {
+        const payload = { username: user.username, sub: user.id }
+        return {
+            access_token: this.jwtService.sign(payload)
+        };
     }
     
     /**
@@ -63,11 +75,10 @@ export default class AuthService {
      * @param user user entity to set permissions on
      */
     private async setPermissionLevel(user: User) {
-        if (await this.isAnyUserInDatabase()) {
-            user.permissionLevel = 'ADMIN';
-        } else {
-            user.permissionLevel = 'USER';
+        if (!(await this.isAnyUserInDatabase())) {
+            return user.permissionLevel = 'ADMIN';
         }
+        user.permissionLevel = 'USER';
     }
     private async isAnyUserInDatabase(): Promise<boolean> {
         return (await this.userRepository.count()) > 0;
